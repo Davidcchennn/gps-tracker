@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>GPS Tracker Mobile</title>
+</head>
+<body>
+  <h2>📡 Gửi vị trí mỗi 30 giây</h2>
+  <p id="status">Đang lấy vị trí...</p>
+
+  <script>
+    const targetWebhook = "https://cham-cong.com/webhook-test/gps-track";
+
+    async function sendViaProxy(data) {
+      const proxyURL = "https://corsproxy.io/?" + encodeURIComponent(targetWebhook);
+      const res = await fetch(proxyURL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(data)
+      });
+
+      return res.ok;
+    }
+
+    function sendLocation() {
+      if (!navigator.geolocation) {
+        document.getElementById("status").textContent = "Trình duyệt không hỗ trợ định vị.";
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          const data = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            accuracy: position.coords.accuracy,
+            timestamp: Date.now()
+          };
+
+          const ok = await sendViaProxy(data);
+          document.getElementById("status").textContent =
+            ok
+              ? `📍 Đã gửi: ${data.latitude.toFixed(5)}, ${data.longitude.toFixed(5)} lúc ${new Date().toLocaleTimeString()}`
+              : "🚫 Gửi thất bại!";
+        },
+        (error) => {
+          document.getElementById("status").textContent = "Lỗi GPS: " + error.message;
+        },
+        { enableHighAccuracy: true }
+      );
+    }
+
+    sendLocation();
+    setInterval(sendLocation, 30000);
+  </script>
+</body>
+</html>
