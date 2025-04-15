@@ -13,20 +13,22 @@
 
     async function sendViaProxy(data) {
       const proxyURL = "https://corsproxy.io/?" + encodeURIComponent(targetWebhook);
-      const res = await fetch(proxyURL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(data)
-      });
-
-      return res.ok;
+      try {
+        const res = await fetch(proxyURL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data)
+        });
+        return res.ok;
+      } catch (err) {
+        console.error("Lỗi gửi webhook:", err);
+        return false;
+      }
     }
 
     function sendLocation() {
       if (!navigator.geolocation) {
-        document.getElementById("status").textContent = "Trình duyệt không hỗ trợ định vị.";
+        document.getElementById("status").textContent = "❌ Trình duyệt không hỗ trợ định vị.";
         return;
       }
 
@@ -39,6 +41,8 @@
             timestamp: Date.now()
           };
 
+          console.log("Lấy được GPS:", data);
+
           const ok = await sendViaProxy(data);
           document.getElementById("status").textContent =
             ok
@@ -46,9 +50,10 @@
               : "🚫 Gửi thất bại!";
         },
         (error) => {
-          document.getElementById("status").textContent = "Lỗi GPS: " + error.message;
+          document.getElementById("status").textContent = "❌ Lỗi GPS: " + error.message;
+          console.error("Lỗi GPS:", error);
         },
-        { enableHighAccuracy: true }
+        { enableHighAccuracy: true, timeout: 10000 }
       );
     }
 
