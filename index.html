@@ -1,64 +1,299 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-  <meta charset="UTF-8">
-  <title>GPS Tracker Mobile</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ứng dụng Theo dõi Vị trí</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f7;
+            color: #333;
+        }
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            background-color: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #007aff;
+            margin-bottom: 20px;
+        }
+        .status-box {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            background-color: #f0f0f0;
+        }
+        .coordinates {
+            font-family: monospace;
+            font-size: 14px;
+            margin-bottom: 5px;
+        }
+        .log-container {
+            margin-top: 20px;
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 10px;
+            background-color: #f9f9f9;
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            font-size: 12px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 5px;
+        }
+        .success {
+            color: #34c759;
+        }
+        .error {
+            color: #ff3b30;
+        }
+        button {
+            background-color: #007aff;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 16px;
+            width: 100%;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        button:disabled {
+            background-color: #999;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        .active {
+            background-color: #34c759;
+        }
+        .inactive {
+            background-color: #ff3b30;
+        }
+    </style>
 </head>
 <body>
-  <h2>📡 Gửi vị trí mỗi 30 giây</h2>
-  <p id="status">Đang lấy vị trí...</p>
+    <div class="container">
+        <h1>Theo dõi Vị trí</h1>
+        
+        <button id="startTracking">Bắt đầu theo dõi</button>
+        <button id="stopTracking" disabled>Dừng theo dõi</button>
+        
+        <div class="status-box">
+            <p>
+                <span class="status-indicator inactive" id="statusIndicator"></span>
+                <strong>Trạng thái:</strong> <span id="status">Chưa theo dõi</span>
+            </p>
+            <p class="coordinates"><strong>Vĩ độ:</strong> <span id="latitude">--</span></p>
+            <p class="coordinates"><strong>Kinh độ:</strong> <span id="longitude">--</span></p>
+            <p class="coordinates"><strong>Độ chính xác:</strong> <span id="accuracy">--</span> m</p>
+            <p><strong>Cập nhật lần cuối:</strong> <span id="lastUpdate">--</span></p>
+        </div>
+        
+        <div class="log-container">
+            <div id="log"></div>
+        </div>
+    </div>
 
-  <script>
-    const targetWebhook = "https://cham-cong.com/webhook-test/gps-track";
-
-    async function sendViaProxy(data) {
-      const proxyURL = "https://corsproxy.io/?" + encodeURIComponent(targetWebhook);
-      try {
-        const res = await fetch(proxyURL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(data)
+    <script>
+        const webhookUrl = 'https://cham-cong.com/webhook/gps-track';
+        const updateInterval = 30000; // 30 giây
+        
+        let watchId = null;
+        let intervalId = null;
+        let lastPosition = null;
+        
+        const elements = {
+            startBtn: document.getElementById('startTracking'),
+            stopBtn: document.getElementById('stopTracking'),
+            status: document.getElementById('status'),
+            statusIndicator: document.getElementById('statusIndicator'),
+            latitude: document.getElementById('latitude'),
+            longitude: document.getElementById('longitude'),
+            accuracy: document.getElementById('accuracy'),
+            lastUpdate: document.getElementById('lastUpdate'),
+            log: document.getElementById('log')
+        };
+        
+        // Thêm bản ghi vào nhật ký
+        function addLogEntry(message, isError = false) {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${isError ? 'error' : ''}`;
+            
+            const time = new Date().toLocaleTimeString();
+            entry.textContent = `[${time}] ${message}`;
+            
+            elements.log.prepend(entry);
+        }
+        
+        // Cập nhật giao diện với vị trí mới
+        function updatePositionUI(position) {
+            const { latitude, longitude, accuracy } = position.coords;
+            
+            elements.latitude.textContent = latitude.toFixed(6);
+            elements.longitude.textContent = longitude.toFixed(6);
+            elements.accuracy.textContent = accuracy.toFixed(1);
+            elements.lastUpdate.textContent = new Date().toLocaleTimeString();
+            
+            lastPosition = position;
+        }
+        
+        // Gửi vị trí đến webhook
+        async function sendPositionToWebhook() {
+            if (!lastPosition) return;
+            
+            const { latitude, longitude, accuracy } = lastPosition.coords;
+            const timestamp = new Date().toISOString();
+            
+            const payload = {
+                latitude,
+                longitude,
+                accuracy,
+                timestamp
+            };
+            
+            try {
+                addLogEntry(`Đang gửi vị trí: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+                
+                const response = await fetch(webhookUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (response.ok) {
+                    addLogEntry('Gửi vị trí thành công', false);
+                } else {
+                    addLogEntry(`Lỗi khi gửi: ${response.status} ${response.statusText}`, true);
+                }
+            } catch (error) {
+                addLogEntry(`Lỗi kết nối: ${error.message}`, true);
+            }
+        }
+        
+        // Xử lý khi có vị trí mới
+        function handlePositionSuccess(position) {
+            updatePositionUI(position);
+        }
+        
+        // Xử lý khi có lỗi lấy vị trí
+        function handlePositionError(error) {
+            let errorMessage;
+            
+            switch(error.code) {
+                case error.PERMISSION_DENIED:
+                    errorMessage = "Người dùng từ chối cấp quyền vị trí.";
+                    break;
+                case error.POSITION_UNAVAILABLE:
+                    errorMessage = "Thông tin vị trí không khả dụng.";
+                    break;
+                case error.TIMEOUT:
+                    errorMessage = "Yêu cầu vị trí đã hết thời gian chờ.";
+                    break;
+                case error.UNKNOWN_ERROR:
+                    errorMessage = "Đã xảy ra lỗi không xác định.";
+                    break;
+            }
+            
+            addLogEntry(errorMessage, true);
+            elements.status.textContent = "Lỗi: " + errorMessage;
+        }
+        
+        // Bắt đầu theo dõi vị trí
+        function startTracking() {
+            if (!navigator.geolocation) {
+                addLogEntry("Trình duyệt không hỗ trợ Geolocation API", true);
+                return;
+            }
+            
+            elements.startBtn.disabled = true;
+            elements.stopBtn.disabled = false;
+            elements.status.textContent = "Đang theo dõi...";
+            elements.statusIndicator.classList.remove('inactive');
+            elements.statusIndicator.classList.add('active');
+            
+            addLogEntry("Bắt đầu theo dõi vị trí");
+            
+            // Thiết lập các tùy chọn cho geolocation
+            const options = {
+                enableHighAccuracy: true,
+                maximumAge: 0,
+                timeout: 10000
+            };
+            
+            // Lấy vị trí ngay lập tức
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    handlePositionSuccess(position);
+                    sendPositionToWebhook();
+                },
+                handlePositionError,
+                options
+            );
+            
+            // Theo dõi vị trí liên tục
+            watchId = navigator.geolocation.watchPosition(
+                handlePositionSuccess,
+                handlePositionError,
+                options
+            );
+            
+            // Thiết lập interval để gửi vị trí đến webhook
+            intervalId = setInterval(sendPositionToWebhook, updateInterval);
+        }
+        
+        // Dừng theo dõi vị trí
+        function stopTracking() {
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+            }
+            
+            if (intervalId !== null) {
+                clearInterval(intervalId);
+                intervalId = null;
+            }
+            
+            elements.startBtn.disabled = false;
+            elements.stopBtn.disabled = true;
+            elements.status.textContent = "Đã dừng theo dõi";
+            elements.statusIndicator.classList.remove('active');
+            elements.statusIndicator.classList.add('inactive');
+            
+            addLogEntry("Đã dừng theo dõi vị trí");
+        }
+        
+        // Đăng ký sự kiện
+        elements.startBtn.addEventListener('click', startTracking);
+        elements.stopBtn.addEventListener('click', stopTracking);
+        
+        // Xử lý khi trang bị đóng
+        window.addEventListener('beforeunload', () => {
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+            }
+            
+            if (intervalId !== null) {
+                clearInterval(intervalId);
+            }
         });
-        return res.ok;
-      } catch (err) {
-        console.error("Lỗi gửi webhook:", err);
-        return false;
-      }
-    }
-
-    function sendLocation() {
-      if (!navigator.geolocation) {
-        document.getElementById("status").textContent = "❌ Trình duyệt không hỗ trợ định vị.";
-        return;
-      }
-
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          const data = {
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-            accuracy: position.coords.accuracy,
-            timestamp: Date.now()
-          };
-
-          console.log("Lấy được GPS:", data);
-
-          const ok = await sendViaProxy(data);
-          document.getElementById("status").textContent =
-            ok
-              ? `📍 Đã gửi: ${data.latitude.toFixed(5)}, ${data.longitude.toFixed(5)} lúc ${new Date().toLocaleTimeString()}`
-              : "🚫 Gửi thất bại!";
-        },
-        (error) => {
-          document.getElementById("status").textContent = "❌ Lỗi GPS: " + error.message;
-          console.error("Lỗi GPS:", error);
-        },
-        { enableHighAccuracy: true, timeout: 10000 }
-      );
-    }
-
-    sendLocation();
-    setInterval(sendLocation, 30000);
-  </script>
+    </script>
 </body>
 </html>
